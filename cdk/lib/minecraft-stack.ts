@@ -1,3 +1,4 @@
+import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import * as path from 'path';
 import {
   Stack,
@@ -14,7 +15,6 @@ import {
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { constants } from './constants';
-import { SSMParameterReader } from './ssm-parameter-reader';
 import { StackConfig } from './types';
 import { getMinecraftServerConfig, isDockerInstalled } from './util';
 
@@ -188,14 +188,9 @@ export class MinecraftStack extends Stack {
       minecraftServerService.connections
     );
 
-    const hostedZoneId = new SSMParameterReader(
-      this,
-      'Route53HostedZoneIdReader',
-      {
-        parameterName: constants.HOSTED_ZONE_SSM_PARAMETER,
-        region: constants.DOMAIN_STACK_REGION,
-      }
-    ).getParameterValue();
+    const hostedZoneId = StringParameter
+      .fromStringParameterName(this, 'HostedZoneIdParameter', constants.HOSTED_ZONE_SSM_PARAMETER)
+      .stringValue;
 
     let snsTopicArn = '';
     /* Create SNS Topic if SNS_EMAIL is provided */
@@ -287,14 +282,10 @@ export class MinecraftStack extends Stack {
     /**
      * Add service control policy to the launcher lambda from the other stack
      */
-    const launcherLambdaRoleArn = new SSMParameterReader(
-      this,
-      'launcherLambdaRoleArn',
-      {
-        parameterName: constants.LAUNCHER_LAMBDA_ARN_SSM_PARAMETER,
-        region: constants.DOMAIN_STACK_REGION,
-      }
-    ).getParameterValue();
+    const launcherLambdaRoleArn = StringParameter
+      .fromStringParameterName(this, 'LauncherLambdaRoleArnParameter', constants.LAUNCHER_LAMBDA_ARN_SSM_PARAMETER)
+      .stringValue;
+
     const launcherLambdaRole = iam.Role.fromRoleArn(
       this,
       'LauncherLambdaRole',
