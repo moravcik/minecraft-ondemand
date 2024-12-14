@@ -14,12 +14,16 @@
   },
   "devDependencies": {
     "@types/jest": "^26.0.10",
-    "@types/node": "10.17.27",
+    "@types/node": "20.17.9",
+    "aws-cdk": "^2.172.0",
     "dotenv": "^10.0.0",
+    "esbuild": "^0.24.0",
     "ts-node": "^9.0.0",
-    "typescript": "~3.9.7"
+    "typescript": "~5.5.3"
   },
   "dependencies": {
+    "@aws-sdk/client-ecs": "~3.379.1",
+    "@aws-sdk/smithy-client": "~3.374.0",
     "aws-cdk-lib": "^2.89.0",
     "constructs": "^10.0.0",
     "execa": "^5.1.1",

@@ -1,64 +1,56 @@
-import { StringParameter } from 'aws-cdk-lib/aws-ssm';
-import * as path from 'path';
+import { Stack, StackProps, RemovalPolicy, Arn, ArnFormat } from 'aws-cdk-lib';
+import { Peer, SecurityGroup, Vpc } from 'aws-cdk-lib/aws-ec2';
 import {
-  Stack,
-  StackProps,
-  aws_ec2 as ec2,
-  aws_efs as efs,
-  aws_iam as iam,
-  aws_ecs as ecs,
-  aws_logs as logs,
-  aws_sns as sns,
-  RemovalPolicy,
-  Arn,
-  ArnFormat,
-} from 'aws-cdk-lib';
+  AwsLogDriver,
+  Cluster,
+  ContainerDefinition,
+  ContainerImage,
+  FargateService,
+  FargateTaskDefinition
+} from 'aws-cdk-lib/aws-ecs';
+import { AccessPoint, FileSystem } from 'aws-cdk-lib/aws-efs';
+import { Effect, Policy, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Subscription, SubscriptionProtocol, Topic } from 'aws-cdk-lib/aws-sns';
+import * as path from 'path';
 import { Construct } from 'constructs';
 import { constants } from './constants';
+import { DomainStackExports } from './domain-stack';
 import { StackConfig } from './types';
 import { getMinecraftServerConfig, isDockerInstalled } from './util';
 
 interface MinecraftStackProps extends StackProps {
   config: Readonly<StackConfig>;
+  domain: DomainStackExports;
 }
 
 export class MinecraftStack extends Stack {
   constructor(scope: Construct, id: string, props: MinecraftStackProps) {
     super(scope, id, props);
 
-    const { config } = props;
+    const { config, domain } = props;
 
     const vpc = config.vpcId
-      ? ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: config.vpcId })
-      : new ec2.Vpc(this, 'Vpc', {
-          maxAzs: 3,
-          natGateways: 0,
-        });
+      ? Vpc.fromLookup(this, 'Vpc', { vpcId: config.vpcId })
+      : new Vpc(this, 'Vpc', { maxAzs: 3, natGateways: 0 });
 
-    const fileSystem = new efs.FileSystem(this, 'FileSystem', {
+    const fileSystem = new FileSystem(this, 'FileSystem', {
       vpc,
       removalPolicy: RemovalPolicy.SNAPSHOT,
     });
 
-    const accessPoint = new efs.AccessPoint(this, 'AccessPoint', {
+    const accessPoint = new AccessPoint(this, 'AccessPoint', {
       fileSystem,
       path: '/minecraft',
-      posixUser: {
-        uid: '1000',
-        gid: '1000',
-      },
-      createAcl: {
-        ownerGid: '1000',
-        ownerUid: '1000',
-        permissions: '0755',
-      },
+      posixUser: { uid: '1000', gid: '1000' },
+      createAcl: { ownerGid: '1000', ownerUid: '1000', permissions: '0755' },
     });
 
-    const efsReadWriteDataPolicy = new iam.Policy(this, 'DataRWPolicy', {
+    const efsReadWriteDataPolicy = new Policy(this, 'DataRWPolicy', {
       statements: [
-        new iam.PolicyStatement({
+        new PolicyStatement({
           sid: 'AllowReadWriteOnEFS',
-          effect: iam.Effect.ALLOW,
+          effect: Effect.ALLOW,
           actions: [
             'elasticfilesystem:ClientMount',
             'elasticfilesystem:ClientWrite',
@@ -66,79 +58,60 @@ export class MinecraftStack extends Stack {
           ],
           resources: [fileSystem.fileSystemArn],
           conditions: {
-            StringEquals: {
-              'elasticfilesystem:AccessPointArn': accessPoint.accessPointArn,
-            },
+            StringEquals: { 'elasticfilesystem:AccessPointArn': accessPoint.accessPointArn },
           },
         }),
       ],
     });
 
-    const ecsTaskRole = new iam.Role(this, 'TaskRole', {
-      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+    const ecsTaskRole = new Role(this, 'TaskRole', {
+      assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
       description: 'Minecraft ECS task role',
     });
 
     efsReadWriteDataPolicy.attachToRole(ecsTaskRole);
 
-    const cluster = new ecs.Cluster(this, 'Cluster', {
+    const cluster = new Cluster(this, 'Cluster', {
       clusterName: constants.CLUSTER_NAME,
       vpc,
       containerInsights: true, // TODO: Add config for container insights
       enableFargateCapacityProviders: true,
     });
 
-    const taskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      'TaskDefinition',
-      {
-        taskRole: ecsTaskRole,
-        memoryLimitMiB: config.taskMemory,
-        cpu: config.taskCpu,
-        volumes: [
-          {
-            name: constants.ECS_VOLUME_NAME,
-            efsVolumeConfiguration: {
-              fileSystemId: fileSystem.fileSystemId,
-              transitEncryption: 'ENABLED',
-              authorizationConfig: {
-                accessPointId: accessPoint.accessPointId,
-                iam: 'ENABLED',
-              },
-            },
-          },
-        ],
-      }
-    );
+    const taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      taskRole: ecsTaskRole,
+      memoryLimitMiB: config.taskMemory,
+      cpu: config.taskCpu,
+      volumes: [{
+        name: constants.ECS_VOLUME_NAME,
+        efsVolumeConfiguration: {
+          fileSystemId: fileSystem.fileSystemId,
+          transitEncryption: 'ENABLED',
+          authorizationConfig: { accessPointId: accessPoint.accessPointId, iam: 'ENABLED' },
+        },
+      }],
+    });
 
-    const minecraftServerConfig = getMinecraftServerConfig(
-      config.minecraftEdition
-    );
+    const minecraftServerConfig = getMinecraftServerConfig(config.minecraftEdition);
 
-    const minecraftServerContainer = new ecs.ContainerDefinition(
-      this,
-      'ServerContainer',
-      {
-        containerName: constants.MC_SERVER_CONTAINER_NAME,
-        image: ecs.ContainerImage.fromRegistry(minecraftServerConfig.image),
-        portMappings: [
-          {
-            containerPort: minecraftServerConfig.port,
-            hostPort: minecraftServerConfig.port,
-            protocol: minecraftServerConfig.protocol,
-          },
-        ],
-        environment: config.minecraftImageEnv,
-        essential: false,
-        taskDefinition,
-        logging: config.debug
-          ? new ecs.AwsLogDriver({
-              logRetention: logs.RetentionDays.THREE_DAYS,
-              streamPrefix: constants.MC_SERVER_CONTAINER_NAME,
-            })
-          : undefined,
-      }
-    );
+    const minecraftServerContainer = new ContainerDefinition(this, 'ServerContainer', {
+      containerName: constants.MC_SERVER_CONTAINER_NAME,
+      image: ContainerImage.fromRegistry(minecraftServerConfig.image),
+      portMappings: [{
+        containerPort: minecraftServerConfig.port,
+        hostPort: minecraftServerConfig.port,
+        protocol: minecraftServerConfig.protocol,
+      }],
+      environment: config.minecraftImageEnv,
+      essential: true,
+      taskDefinition,
+      logging: config.debug
+        ? new AwsLogDriver({
+            logRetention: RetentionDays.THREE_DAYS,
+            streamPrefix: constants.MC_SERVER_CONTAINER_NAME,
+          })
+        : undefined,
+    });
 
     minecraftServerContainer.addMountPoints({
       containerPath: '/data',
@@ -146,114 +119,76 @@ export class MinecraftStack extends Stack {
       readOnly: false,
     });
 
-    const serviceSecurityGroup = new ec2.SecurityGroup(
-      this,
-      'ServiceSecurityGroup',
-      {
-        vpc,
-        description: 'Security group for Minecraft on-demand',
-      }
-    );
+    const serviceSecurityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      description: 'Security group for Minecraft on-demand',
+    });
+    serviceSecurityGroup.addIngressRule(Peer.anyIpv4(), minecraftServerConfig.ingressRulePort);
 
-    serviceSecurityGroup.addIngressRule(
-      ec2.Peer.anyIpv4(),
-      minecraftServerConfig.ingressRulePort
-    );
-
-    const minecraftServerService = new ecs.FargateService(
-      this,
-      'FargateService',
-      {
-        cluster,
-        capacityProviderStrategies: [
-          {
-            capacityProvider: config.useFargateSpot
-              ? 'FARGATE_SPOT'
-              : 'FARGATE',
-            weight: 1,
-            base: 1,
-          },
-        ],
-        taskDefinition: taskDefinition,
-        platformVersion: ecs.FargatePlatformVersion.LATEST,
-        serviceName: constants.SERVICE_NAME,
-        desiredCount: 0,
-        assignPublicIp: true,
-        securityGroups: [serviceSecurityGroup],
-      }
-    );
+    const minecraftServerService = new FargateService(this, 'FargateService', {
+      cluster,
+      capacityProviderStrategies: [{
+        capacityProvider: config.useFargateSpot ? 'FARGATE_SPOT' : 'FARGATE',
+        weight: 1,
+        base: 1,
+      }],
+      enableExecuteCommand: true,
+      taskDefinition,
+      serviceName: constants.SERVICE_NAME,
+      desiredCount: 0,
+      assignPublicIp: true,
+      securityGroups: [serviceSecurityGroup],
+    });
 
     /* Allow access to EFS from Fargate service security group */
-    fileSystem.connections.allowDefaultPortFrom(
-      minecraftServerService.connections
-    );
-
-    const hostedZoneId = StringParameter
-      .fromStringParameterName(this, 'HostedZoneIdParameter', constants.HOSTED_ZONE_SSM_PARAMETER)
-      .stringValue;
+    fileSystem.connections.allowDefaultPortFrom(minecraftServerService.connections);
 
     let snsTopicArn = '';
-    /* Create SNS Topic if SNS_EMAIL is provided */
+    // Create SNS Topic if SNS_EMAIL is provided
     if (config.snsEmailAddress) {
-      const snsTopic = new sns.Topic(this, 'ServerSnsTopic', {
-        displayName: 'Minecraft Server Notifications',
-      });
-
+      const snsTopic = new Topic(this, 'ServerSnsTopic', { displayName: 'Minecraft Server Notifications' });
       snsTopic.grantPublish(ecsTaskRole);
-
-      const emailSubscription = new sns.Subscription(
-        this,
-        'EmailSubscription',
-        {
-          protocol: sns.SubscriptionProtocol.EMAIL,
-          topic: snsTopic,
-          endpoint: config.snsEmailAddress,
-        }
-      );
+      new Subscription(this, 'EmailSubscription', {
+        protocol: SubscriptionProtocol.EMAIL,
+        topic: snsTopic,
+        endpoint: config.snsEmailAddress,
+      });
       snsTopicArn = snsTopic.topicArn;
     }
 
-    const watchdogContainer = new ecs.ContainerDefinition(
-      this,
-      'WatchDogContainer',
-      {
-        containerName: constants.WATCHDOG_SERVER_CONTAINER_NAME,
-        image: isDockerInstalled()
-          ? ecs.ContainerImage.fromAsset(
-              path.resolve(__dirname, '../../minecraft-ecsfargate-watchdog/')
-            )
-          : ecs.ContainerImage.fromRegistry(
-              'doctorray/minecraft-ecsfargate-watchdog'
-            ),
-        essential: true,
-        taskDefinition: taskDefinition,
-        environment: {
-          CLUSTER: constants.CLUSTER_NAME,
-          SERVICE: constants.SERVICE_NAME,
-          DNSZONE: hostedZoneId,
-          SERVERNAME: `${config.subdomainPart}.${config.domainName}`,
-          SNSTOPIC: snsTopicArn,
-          TWILIOFROM: config.twilio.phoneFrom,
-          TWILIOTO: config.twilio.phoneTo,
-          TWILIOAID: config.twilio.accountId,
-          TWILIOAUTH: config.twilio.authCode,
-          STARTUPMIN: config.startupMinutes,
-          SHUTDOWNMIN: config.shutdownMinutes,
-        },
-        logging: config.debug
-          ? new ecs.AwsLogDriver({
-              logRetention: logs.RetentionDays.THREE_DAYS,
-              streamPrefix: constants.WATCHDOG_SERVER_CONTAINER_NAME,
-            })
-          : undefined,
-      }
-    );
+    new ContainerDefinition(this, 'WatchDogContainer', {
+      containerName: constants.WATCHDOG_SERVER_CONTAINER_NAME,
+      image: isDockerInstalled()
+        ? ContainerImage.fromAsset(path.resolve(__dirname, '../../minecraft-ecsfargate-watchdog/'))
+        : ContainerImage.fromRegistry('doctorray/minecraft-ecsfargate-watchdog'),
+      essential: true,
+      taskDefinition,
+      environment: {
+        CLUSTER: constants.CLUSTER_NAME,
+        SERVICE: constants.SERVICE_NAME,
+        DNSZONE: domain.subdomainHostedZoneId,
+        SERVERNAME: `${config.subdomainPart}.${config.domainName}`,
+        SNSTOPIC: snsTopicArn,
+        TWILIOFROM: config.twilio.phoneFrom,
+        TWILIOTO: config.twilio.phoneTo,
+        TWILIOAID: config.twilio.accountId,
+        TWILIOAUTH: config.twilio.authCode,
+        STARTUPMIN: config.startupMinutes,
+        SHUTDOWNMIN: config.shutdownMinutes,
+      },
+      logging: config.debug
+        ? new AwsLogDriver({
+            logRetention: RetentionDays.THREE_DAYS,
+            streamPrefix: constants.WATCHDOG_SERVER_CONTAINER_NAME,
+          })
+        : undefined,
+    });
 
-    const serviceControlPolicy = new iam.Policy(this, 'ServiceControlPolicy', {
+    const serviceControlPolicy = new Policy(this, 'ServiceControlPolicy', {
       statements: [
-        new iam.PolicyStatement({
+        new PolicyStatement({
           sid: 'AllowAllOnServiceAndTask',
-          effect: iam.Effect.ALLOW,
+          effect: Effect.ALLOW,
           actions: ['ecs:*'],
           resources: [
             minecraftServerService.serviceArn,
@@ -269,8 +204,8 @@ export class MinecraftStack extends Stack {
             ),
           ],
         }),
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
+        new PolicyStatement({
+          effect: Effect.ALLOW,
           actions: ['ec2:DescribeNetworkInterfaces'],
           resources: ['*'],
         }),
@@ -279,18 +214,7 @@ export class MinecraftStack extends Stack {
 
     serviceControlPolicy.attachToRole(ecsTaskRole);
 
-    /**
-     * Add service control policy to the launcher lambda from the other stack
-     */
-    const launcherLambdaRoleArn = StringParameter
-      .fromStringParameterName(this, 'LauncherLambdaRoleArnParameter', constants.LAUNCHER_LAMBDA_ARN_SSM_PARAMETER)
-      .stringValue;
-
-    const launcherLambdaRole = iam.Role.fromRoleArn(
-      this,
-      'LauncherLambdaRole',
-      launcherLambdaRoleArn
-    );
+    const launcherLambdaRole = Role.fromRoleArn(this, 'LauncherLambdaRole', domain.launcherLambdaRoleArn);
     serviceControlPolicy.attachToRole(launcherLambdaRole);
 
     /**
@@ -298,17 +222,17 @@ export class MinecraftStack extends Stack {
      * associated with our minecraft server. Retrieve the hosted zone identifier
      * from Route 53 and place it in the Resource line within this policy.
      */
-    const iamRoute53Policy = new iam.Policy(this, 'IamRoute53Policy', {
+    const iamRoute53Policy = new Policy(this, 'IamRoute53Policy', {
       statements: [
-        new iam.PolicyStatement({
+        new PolicyStatement({
           sid: 'AllowEditRecordSets',
-          effect: iam.Effect.ALLOW,
+          effect: Effect.ALLOW,
           actions: [
             'route53:GetHostedZone',
             'route53:ChangeResourceRecordSets',
             'route53:ListResourceRecordSets',
           ],
-          resources: [`arn:aws:route53:::hostedzone/${hostedZoneId}`],
+          resources: [`arn:aws:route53:::hostedzone/${domain.subdomainHostedZoneId}`],
         }),
       ],
     });

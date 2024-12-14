@@ -65,7 +65,7 @@ cat << EOF >> minecraft-dns.json
       "ResourceRecordSet": {
         "Name": "$SERVERNAME",
         "Type": "A",
-        "TTL": 30,
+        "TTL": 15,
         "ResourceRecords": [
           {
             "Value": "$PUBLICIP"

@@ -26,15 +26,17 @@ const domainStack = new DomainStack(app, 'minecraft-domain-stack', {
     account: process.env.CDK_DEFAULT_ACCOUNT,
   },
   config,
+  crossRegionReferences: true,
 });
 
-const minecraftStack = new MinecraftStack(app, 'minecraft-server-stack', {
+new MinecraftStack(app, 'minecraft-server-stack', {
   env: {
     region: config.serverRegion,
     /* Account must be specified to allow for VPC lookup */
     account: process.env.CDK_DEFAULT_ACCOUNT,
   },
   config,
+  crossRegionReferences: true,
+  domain: domainStack.exports,
 });
 
-minecraftStack.addDependency(domainStack);
