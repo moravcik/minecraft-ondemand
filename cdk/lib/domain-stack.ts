@@ -7,9 +7,9 @@ import { LambdaDestination } from 'aws-cdk-lib/aws-logs-destinations';
 import { ARecord, HostedZone, NsRecord } from 'aws-cdk-lib/aws-route53';
 import { Construct } from 'constructs';
 import * as path from 'path';
-import { constants } from './constants';
+import { constants } from './config';
+import { StackConfig } from './config-types';
 import { CWGlobalResourcePolicy } from './cw-global-resource-policy';
-import { StackConfig } from './types';
 
 interface DomainStackProps extends StackProps {
   config: Readonly<StackConfig>;
@@ -114,6 +114,7 @@ export class DomainStack extends Stack {
       entry: path.resolve(__dirname, '../../lambda/launcher-lambda.ts'),
       runtime: Runtime.NODEJS_20_X,
       architecture: Architecture.ARM_64,
+      memorySize: 192,
       environment: {
         REGION: config.serverRegion,
         CLUSTER: constants.CLUSTER_NAME,

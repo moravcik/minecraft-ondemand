@@ -3,17 +3,11 @@ import type { Port } from 'aws-cdk-lib/aws-ec2';
 
 interface TwilioConfig {
   /**
-   * Your twilio phone number.
-   *
-   * @example
-   * `+1XXXYYYZZZZ`
+   * Your twilio phone number. `+1XXXYYYZZZZ`
    */
   phoneFrom: string;
   /**
-   * Phone number to receive text notifications at.
-   *
-   * @example
-   * `+1XXXYYYZZZZ`
+   * Phone number to receive text notifications at. `+1XXXYYYZZZZ`
    */
   phoneTo: string;
   /**

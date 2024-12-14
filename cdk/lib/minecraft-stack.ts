@@ -14,10 +14,9 @@ import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Subscription, SubscriptionProtocol, Topic } from 'aws-cdk-lib/aws-sns';
 import * as path from 'path';
 import { Construct } from 'constructs';
-import { constants } from './constants';
+import { constants, getMinecraftServerConfig, isDockerInstalled } from './config';
+import { StackConfig } from './config-types';
 import { DomainStackExports } from './domain-stack';
-import { StackConfig } from './types';
-import { getMinecraftServerConfig, isDockerInstalled } from './util';
 
 interface MinecraftStackProps extends StackProps {
   config: Readonly<StackConfig>;

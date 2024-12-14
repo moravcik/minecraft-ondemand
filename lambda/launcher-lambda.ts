@@ -7,7 +7,6 @@ const service = process.env.SERVICE || 'minecraft-server';
 const ecsClient = new ECSClient({ region });
 
 export async function handler(event: any, context: any): Promise<void> {
-  console.log('Launcher lambda invoked', event);
   const { services } = await ecsClient.send(new DescribeServicesCommand({ cluster, services: [service] }));
   const desired = services![0].desiredCount;
   if (desired === 0) {

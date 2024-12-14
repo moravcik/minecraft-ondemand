@@ -3,8 +3,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { MinecraftStack } from '../lib/minecraft-stack';
 import { DomainStack } from '../lib/domain-stack';
-import { constants } from '../lib/constants';
-import { resolveConfig } from '../lib/config';
+import { constants, resolveConfig } from '../lib/config';
 
 const app = new cdk.App();
 
