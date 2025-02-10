@@ -14,7 +14,8 @@ import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Subscription, SubscriptionProtocol, Topic } from 'aws-cdk-lib/aws-sns';
 import * as path from 'path';
 import { Construct } from 'constructs';
-import { constants, getMinecraftServerConfig, isDockerInstalled } from './config';
+import { BastionHost } from './bastion-host';
+import { getMinecraftServerConfig, isDockerInstalled } from './config';
 import { StackConfig } from './config-types';
 import { DomainStackExports } from './domain-stack';
 
@@ -71,7 +72,7 @@ export class MinecraftStack extends Stack {
     efsReadWriteDataPolicy.attachToRole(ecsTaskRole);
 
     const cluster = new Cluster(this, 'Cluster', {
-      clusterName: constants.CLUSTER_NAME,
+      clusterName: config.clusterName,
       vpc,
       containerInsights: true, // TODO: Add config for container insights
       enableFargateCapacityProviders: true,
@@ -82,7 +83,7 @@ export class MinecraftStack extends Stack {
       memoryLimitMiB: config.taskMemory,
       cpu: config.taskCpu,
       volumes: [{
-        name: constants.ECS_VOLUME_NAME,
+        name: 'data',
         efsVolumeConfiguration: {
           fileSystemId: fileSystem.fileSystemId,
           transitEncryption: 'ENABLED',
@@ -94,7 +95,7 @@ export class MinecraftStack extends Stack {
     const minecraftServerConfig = getMinecraftServerConfig(config.minecraftEdition);
 
     const minecraftServerContainer = new ContainerDefinition(this, 'ServerContainer', {
-      containerName: constants.MC_SERVER_CONTAINER_NAME,
+      containerName: config.serviceName,
       image: ContainerImage.fromRegistry(minecraftServerConfig.image),
       portMappings: [{
         containerPort: minecraftServerConfig.port,
@@ -105,16 +106,13 @@ export class MinecraftStack extends Stack {
       essential: true,
       taskDefinition,
       logging: config.debug
-        ? new AwsLogDriver({
-            logRetention: RetentionDays.THREE_DAYS,
-            streamPrefix: constants.MC_SERVER_CONTAINER_NAME,
-          })
+        ? new AwsLogDriver({ logRetention: RetentionDays.THREE_DAYS, streamPrefix: config.serviceName })
         : undefined,
     });
 
     minecraftServerContainer.addMountPoints({
       containerPath: '/data',
-      sourceVolume: constants.ECS_VOLUME_NAME,
+      sourceVolume: 'data',
       readOnly: false,
     });
 
@@ -122,7 +120,9 @@ export class MinecraftStack extends Stack {
       vpc,
       description: 'Security group for Minecraft on-demand',
     });
-    serviceSecurityGroup.addIngressRule(Peer.anyIpv4(), minecraftServerConfig.ingressRulePort);
+    minecraftServerConfig.ingressRulePorts.forEach(port => {
+      serviceSecurityGroup.addIngressRule(Peer.anyIpv4(), port);
+    })
 
     const minecraftServerService = new FargateService(this, 'FargateService', {
       cluster,
@@ -133,7 +133,7 @@ export class MinecraftStack extends Stack {
       }],
       enableExecuteCommand: true,
       taskDefinition,
-      serviceName: constants.SERVICE_NAME,
+      serviceName: config.serviceName,
       desiredCount: 0,
       assignPublicIp: true,
       securityGroups: [serviceSecurityGroup],
@@ -156,15 +156,15 @@ export class MinecraftStack extends Stack {
     }
 
     new ContainerDefinition(this, 'WatchDogContainer', {
-      containerName: constants.WATCHDOG_SERVER_CONTAINER_NAME,
+      containerName: `${config.serviceName}-watchdog`,
       image: isDockerInstalled()
         ? ContainerImage.fromAsset(path.resolve(__dirname, '../../minecraft-ecsfargate-watchdog/'))
         : ContainerImage.fromRegistry('doctorray/minecraft-ecsfargate-watchdog'),
       essential: true,
       taskDefinition,
       environment: {
-        CLUSTER: constants.CLUSTER_NAME,
-        SERVICE: constants.SERVICE_NAME,
+        CLUSTER: config.clusterName,
+        SERVICE: config.serviceName,
         DNSZONE: domain.subdomainHostedZoneId,
         SERVERNAME: `${config.subdomainPart}.${config.domainName}`,
         SNSTOPIC: snsTopicArn,
@@ -178,7 +178,7 @@ export class MinecraftStack extends Stack {
       logging: config.debug
         ? new AwsLogDriver({
             logRetention: RetentionDays.THREE_DAYS,
-            streamPrefix: constants.WATCHDOG_SERVER_CONTAINER_NAME,
+            streamPrefix: `${config.serviceName}-watchdog`,
           })
         : undefined,
     });
@@ -196,7 +196,7 @@ export class MinecraftStack extends Stack {
               {
                 service: 'ecs',
                 resource: 'task',
-                resourceName: `${constants.CLUSTER_NAME}/*`,
+                resourceName: `${config.clusterName}/*`,
                 arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
               },
               this
@@ -236,5 +236,9 @@ export class MinecraftStack extends Stack {
       ],
     });
     iamRoute53Policy.attachToRole(ecsTaskRole);
+
+    if (config.bastionHost) {
+      new BastionHost(this, 'BastionHost', { config, vpc, fileSystem });
+    }
   }
 }

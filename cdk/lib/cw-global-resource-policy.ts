@@ -1,9 +1,16 @@
-import { custom_resources as cr, aws_iam as iam, Duration } from 'aws-cdk-lib';
+import { Duration } from 'aws-cdk-lib';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import {
+  AwsCustomResource,
+  AwsCustomResourcePolicy,
+  AwsSdkCall,
+  PhysicalResourceId
+} from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 
 interface CWGlobalResourcePolicyProps {
-  statements: iam.PolicyStatement[];
+  statements: PolicyStatement[];
   policyName: string;
 }
 
@@ -13,37 +20,25 @@ interface CWGlobalResourcePolicyProps {
  * implemented with CDK, so we use a Custom Resource here.
  * See https://github.com/aws/aws-cdk/issues/5343
  */
-export class CWGlobalResourcePolicy extends cr.AwsCustomResource {
-  constructor(
-    scope: Construct,
-    name: string,
-    props: CWGlobalResourcePolicyProps
-  ) {
+export class CWGlobalResourcePolicy extends AwsCustomResource {
+  constructor(scope: Construct, name: string, props: CWGlobalResourcePolicyProps) {
     const { statements, policyName } = props;
 
-    const putResourcePolicy: cr.AwsSdkCall = {
+    const putResourcePolicy: AwsSdkCall = {
       service: 'CloudWatchLogs',
       action: 'putResourcePolicy',
       parameters: {
         policyName,
-        /**
-         * PolicyDocument must be provided as a string, so we can't use the
-         * iam.PolicyDocument provisions or other CDK niceties here.
-         */
-        policyDocument: JSON.stringify({
-          Version: '2012-10-17',
-          Statement: statements,
-        }),
+        // PolicyDocument must be provided as a string, so we can't use the PolicyDocument provisions or other CDK niceties here.
+        policyDocument: JSON.stringify({ Version: '2012-10-17', Statement: statements }),
       },
-      physicalResourceId: cr.PhysicalResourceId.of(policyName),
+      physicalResourceId: PhysicalResourceId.of(policyName),
     };
 
-    const deleteResourcePolicy: cr.AwsSdkCall = {
+    const deleteResourcePolicy: AwsSdkCall = {
       service: 'CloudWatchLogs',
       action: 'deleteResourcePolicy',
-      parameters: {
-        policyName,
-      },
+      parameters: { policyName },
     };
 
     super(scope, name, {
@@ -51,9 +46,7 @@ export class CWGlobalResourcePolicy extends cr.AwsCustomResource {
       onCreate: putResourcePolicy,
       onDelete: deleteResourcePolicy,
       timeout: Duration.minutes(2),
-      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
-        resources: cr.AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
+      policy: AwsCustomResourcePolicy.fromSdkCalls({ resources: AwsCustomResourcePolicy.ANY_RESOURCE }),
       logRetention: RetentionDays.THREE_DAYS,
     });
   }

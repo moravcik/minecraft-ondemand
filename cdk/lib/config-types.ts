@@ -39,11 +39,29 @@ export interface StackConfig {
    */
   subdomainPart: string;
   /**
+   * Prefix to use for all resources created by this stack.
+   *
+   * @default "example-com-minecraft"
+   */
+  resourcePrefix: string;
+  /**
    * The AWS region to deploy your minecraft server in.
    *
    * @default "us-east-1"
    */
   serverRegion: string;
+  /**
+   * Name of the ECS cluster to deploy the Minecraft server to.
+   *
+   * @default "minecraft-cluster"
+   */
+  clusterName: string;
+  /**
+   * Name of the ECS service to deploy the Minecraft server to.
+   *
+   * @default "minecraft-server"
+   */
+  serviceName: string;
   /**
    * Edition of Minecraft server to run. Accepted values are are `java` or `bedrock` for [Minecraft Java Docker] or
    * [Minecraft Bedrock Docker], respectively.
@@ -79,35 +97,22 @@ export interface StackConfig {
   useFargateSpot: boolean;
   /**
    * The number of cpu units used by the task running the Minecraft server.
-   *
    * Valid values, which determines your range of valid values for the memory parameter:
-   *
    * 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
-   *
    * 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
-   *
    * 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
-   *
    * 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
-   *
    * 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
-   *
    * @default 1024 1 vCPU
    */
   taskCpu: number;
   /**
    * The amount (in MiB) of memory used by the task running the Minecraft server.
-   *
    * 512 (0.5 GB), 1024 (1 GB), 2048 (2 GB) - Available cpu values: 256 (.25 vCPU)
-   *
    * 1024 (1 GB), 2048 (2 GB), 3072 (3 GB), 4096 (4 GB) - Available cpu values: 512 (.5 vCPU)
-   *
    * 2048 (2 GB), 3072 (3 GB), 4096 (4 GB), 5120 (5 GB), 6144 (6 GB), 7168 (7 GB), 8192 (8 GB) - Available cpu values: 1024 (1 vCPU)
-   *
    * Between 4096 (4 GB) and 16384 (16 GB) in increments of 1024 (1 GB) - Available cpu values: 2048 (2 vCPU)
-   *
    * Between 8192 (8 GB) and 30720 (30 GB) in increments of 1024 (1 GB) - Available cpu values: 4096 (4 vCPU)
-   *
    * @default 2048 2 GB
    */
   taskMemory: number;
@@ -139,6 +144,10 @@ export interface StackConfig {
    * - CloudWatch Logs for the `minecraft-ecsfargate-watchdog` ECS Container
    */
   debug: boolean;
+  /**
+   * Deploy bastion host for access to the Minecraft server data in EFS
+   */
+  bastionHost: boolean;
 }
 
 export interface MinecraftEditionConfig {
@@ -157,7 +166,7 @@ export interface MinecraftEditionConfig {
    */
   protocol: Protocol;
   /**
-   * The ingress rule port to be used for the service security group
+   * The ingress rule ports to be used for the service security group
    */
-  ingressRulePort: Port;
+  ingressRulePorts: Port[];
 }

@@ -7,7 +7,6 @@ import { LambdaDestination } from 'aws-cdk-lib/aws-logs-destinations';
 import { ARecord, HostedZone, NsRecord } from 'aws-cdk-lib/aws-route53';
 import { Construct } from 'constructs';
 import * as path from 'path';
-import { constants } from './config';
 import { StackConfig } from './config-types';
 import { CWGlobalResourcePolicy } from './cw-global-resource-policy';
 
@@ -46,17 +45,7 @@ export class DomainStack extends Stack {
         effect: Effect.ALLOW,
         principals: [new ServicePrincipal('route53.amazonaws.com')],
         actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
-        resources: [
-          Arn.format(
-            {
-              resource: 'log-group',
-              service: 'logs',
-              resourceName: '*',
-              arnFormat: ArnFormat.COLON_RESOURCE_NAME,
-            },
-            this
-          ),
-        ],
+        resources: [`arn:aws:logs:us-east-1:${this.account}:log-group:/aws/route53/*:*`],
       }),
     ];
     const cloudwatchLogResourcePolicy = new CWGlobalResourcePolicy(
@@ -65,9 +54,7 @@ export class DomainStack extends Stack {
       { policyName, statements: dnsWriteToCw }
     );
 
-    const rootHostedZone = HostedZone.fromLookup(this, 'HostedZone', {
-      domainName: config.domainName,
-    });
+    const rootHostedZone = HostedZone.fromLookup(this, 'HostedZone', { domainName: config.domainName });
 
     const subdomainHostedZone = new HostedZone(
       this,
@@ -91,17 +78,10 @@ export class DomainStack extends Stack {
 
     const aRecord = new ARecord(this, 'ARecord', {
       target: {
-        /**
-         * The value of the record is irrelevant because it will be updated
-         * every time our container launches.
-         */
+        // The value of the record is irrelevant because it will be updated every time our container launches.
         values: ['192.168.1.1'],
       },
-      /**
-       * The low TTL is so that the DNS clients and non-authoritative DNS
-       * servers won't cache the record long and you can connect quicker after
-       * the IP updates.
-       */
+      // The low TTL is so that the DNS clients and non-authoritative DNS servers won't cache the record long
       ttl: Duration.seconds(15),
       recordName: subdomain,
       zone: subdomainHostedZone,
@@ -117,29 +97,21 @@ export class DomainStack extends Stack {
       memorySize: 192,
       environment: {
         REGION: config.serverRegion,
-        CLUSTER: constants.CLUSTER_NAME,
-        SERVICE: constants.SERVICE_NAME,
+        CLUSTER: config.clusterName,
+        SERVICE: config.serviceName,
       },
       logRetention: RetentionDays.THREE_DAYS, // TODO: parameterize
     });
 
-    /**
-     * Give cloudwatch permission to invoke our lambda when our subscription filter
-     * picks up DNS queries.
-     */
+    // Give cloudwatch permission to invoke our lambda when our subscription filter picks up DNS queries.
     launcherLambda.addPermission('CWPermission', {
-      principal: new ServicePrincipal(
-        `logs.${constants.DOMAIN_STACK_REGION}.amazonaws.com`
-      ),
+      principal: new ServicePrincipal('logs.us-east-1.amazonaws.com'),
       action: 'lambda:InvokeFunction',
       sourceAccount: this.account,
       sourceArn: queryLogGroup.logGroupArn,
     });
 
-    /**
-     * Create our log subscription filter to catch any log events containing
-     * our subdomain name and send them to our launcher lambda.
-     */
+    // Create our log subscription filter to catch any log events containing our subdomain name and send them to our launcher lambda.
     queryLogGroup.addSubscriptionFilter('SubscriptionFilter', {
       destination: new LambdaDestination(launcherLambda),
       filterPattern: FilterPattern.anyTerm(subdomain, subdomainNormalized),
