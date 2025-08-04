@@ -33,7 +33,7 @@ export class DomainStack extends Stack {
 
     const queryLogGroup = new LogGroup(this, 'LogGroup', {
       logGroupName: `/aws/route53/${subdomainNormalized}`,
-      retention: RetentionDays.THREE_DAYS,
+      retention: RetentionDays.ONE_WEEK,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
@@ -99,8 +99,9 @@ export class DomainStack extends Stack {
         REGION: config.serverRegion,
         CLUSTER: config.clusterName,
         SERVICE: config.serviceName,
+        ALLOWED_UTC_HOURS: process.env.ALLOWED_UTC_HOURS || '[]'
       },
-      logRetention: RetentionDays.THREE_DAYS, // TODO: parameterize
+      logRetention: RetentionDays.ONE_WEEK, // TODO: parameterize
     });
 
     // Give cloudwatch permission to invoke our lambda when our subscription filter picks up DNS queries.
